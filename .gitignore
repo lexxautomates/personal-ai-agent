@@ -1,0 +1,27 @@
+# Environment and secrets
+.env
+.env.local
+.env.production
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+*.egg
+
+# Flask
+.weblog/
+instance/
+
+# LiveKit token caches
+*.token
+
+# OS
+.DS_Store
+Thumbs.db

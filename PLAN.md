@@ -22,8 +22,8 @@ permission layer so it can be useful without being dangerous.
   to when not on a phone call.
 - Zapier MCP for the long tail of integrations.
 - friday_jarvis as the minimal reference shape for the voice agent.
-- drive-thru / frontdesk / healthcare / hotel_receptionist examples for mature
-  tool patterns.
+- drive-thru / frontdesk / healthcare / hotel_receptionist examples from the
+  LiveKit agents repo for mature tool patterns.
 
 ## Where Flutter fits
 
@@ -34,16 +34,29 @@ fork is the starting point for that client. The assistant backend is the same
 Python agent either way; Flutter is one interaction surface among others, not a
 separate assistant.
 
-Pi is not part of the assistant runtime. It is only relevant as the coding
-assistant used to build and iterate on the agent code and the Flutter client.
+## Where Flask fits
+
+Flask is the web layer around the assistant: a small HTTP surface for things the
+voice channel is not good for — dashboards, manual trigger endpoints, health
+checks, status, config, the permission/policy UI, and integration hooks that
+Zapier or other services hit. It is not the agent runtime; the agent runtime is
+the LiveKit agents SDK Python process. Flask is the companion web API and admin
+surface.
+
+## Pi
+
+Not part of the assistant runtime. Only relevant as the coding assistant used to
+build and iterate on the agent code, the Flask layer, and the Flutter client.
 
 ## Architecture (target)
 
 - LiveKit server as the always-on media/signal layer, self-hosted on the iMac if
   it can be reached, otherwise LiveKit Cloud to start.
-- Python agent app on the LiveKit agents SDK as the runtime.
-- Flutter client from the livekit_flutter_starter shape that connects to the same
-  agent for voice and text on the user's phone/laptop.
+- Python agent app on the LiveKit agents SDK as the runtime (`agent/`).
+- Flask web layer (`web/`) alongside the agent for HTTP endpoints, admin, status,
+  health, and integration hooks.
+- Flutter client (`client/`) adapted from livekit_flutter_starter, pointed at the
+  same LiveKit server and agent.
 - Tool layer:
   - small set of custom tools for things Zapier cannot reach (local notes/files,
     memory, permission gate, follow-up scheduler, voice-specific actions),
@@ -65,18 +78,21 @@ assistant used to build and iterate on the agent code and the Flutter client.
 1. Stand up a minimal voice agent on the LiveKit agents SDK using the
    friday_jarvis shape: Agent, AgentSession, entrypoint, a couple of toy tools,
    persona instructions. Prove the voice loop works end to end.
-2. Add the Flutter client from the livekit_flutter_starter shape so the same
-   agent is reachable from a phone/laptop app, not only from a call.
-3. Pick the first real tool surface for one persona's actual errands, not
+2. Add the Flask web layer with a health endpoint, status endpoint, and config
+   surface. This gives the assistant an HTTP face before any dashboard.
+3. Add the Flutter client from the livekit_flutter_starter shape so the same
+   agent is reachable from a phone/laptop app, not only from a call. Repoint the
+   token source from the LiveKit Cloud homepage endpoint to our own server.
+4. Pick the first real tool surface for one persona's actual errands, not
    "everything." Example: calendar + email + reminders + notes for one user.
-4. Add a Zapier MCP connector early so a big chunk of integrations is reachable
+5. Add a Zapier MCP connector early so a big chunk of integrations is reachable
    without writing each one by hand.
-5. Add cross-session memory: profile + episodic log + follow-up list.
-6. Add the permission/policy layer: what can fire autonomously, what must confirm,
+6. Add cross-session memory: profile + episodic log + follow-up list.
+7. Add the permission/policy layer: what can fire autonomously, what must confirm,
    what is off-limits unattended.
-7. Add background scheduling for reminders and follow-ups.
-8. Polish voice instructions and persona.
-9. Add a few regression scenarios and keep them green as tools change.
+8. Add background scheduling for reminders and follow-ups.
+9. Polish voice instructions and persona.
+10. Add a few regression scenarios and keep them green as tools change.
 
 ## Repos in play
 
@@ -99,17 +115,27 @@ can be snapshotted and shipped to the iMac without dragging the agent source alo
 That repo is lexxautomates/hermes-state. It is private and currently empty; this
 project's Hermes state goes there.
 
+## Blockers
+
+- iMac SSH is not reachable from this machine. Tailscale shows alexandrias-imac-1
+  as active on macOS, but SSH to the tailnet address is blocked with "Permission
+  denied" even with the known hermes_mac_ed25519 key. Until that is fixed, the
+  iMac cannot be the always-on LiveKit host, and Hermes state cannot be pushed to
+  it directly. Two options: fix iMac SSH access from here, or push Hermes state to
+  the private hermes-state repo and pull it down on the iMac from there.
+- The first pass will likely start on LiveKit Cloud for the server until the iMac
+  path is proven.
+
 ## Open questions
 
 - Which backends does this specific user actually want the assistant to touch day
   to day? That determines the real tool list.
 - How much autonomy is wanted vs confirm-first? That determines the policy layer.
-- Self-hosted LiveKit server on the iMac, or LiveKit Cloud to start?
-- iMac SSH is not reachable from this machine yet; Tailscale says the iMac is
-  active but SSH is blocked or missing a usable key. That needs to be fixed before
-  the iMac can be the always-on host or the Hermes-state destination.
 - Which LLM/realtime model and STT/TTS providers for the first pass?
+- Self-hosted LiveKit server on the iMac, or LiveKit Cloud to start?
 
 ## Status
 
-Plan. No code started.
+Plan + first code scaffolding. Minimal voice agent scaffolding in agent/, Flask
+web layer scaffolding in web/, Flutter client adapted from livekit_flutter_starter
+in client/. No live server, no tools beyond stubs, no Zapier MCP yet.
