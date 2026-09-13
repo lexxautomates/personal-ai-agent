@@ -34,6 +34,12 @@ fork is the starting point for that client. The assistant backend is the same
 Python agent either way; Flutter is one interaction surface among others, not a
 separate assistant.
 
+The Flutter client is adapted from livekit_flutter_starter: same architecture —
+`VoiceAssistantApp` → `AppCtrl` (session + room + token sourcing) → `WelcomeScreen`
+(start call) → `AgentScreen` (voice + transcription chat, camera toggle, agent
+track view, audio visualizer). The only change for our personal agent is re-pointing
+the token source from the LiveKit Cloud homepage endpoint to our own LiveKit server.
+
 ## Where Flask fits
 
 Flask is the web layer around the assistant: a small HTTP surface for things the
