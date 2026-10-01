@@ -1,95 +1,98 @@
-# LiveKit agents SDK voice runtime for the personal AI assistant.
+# Jarvis — Alexandria's personal AI butler.
 #
 # Shape: friday_jarvis minimal reference.
 #   Agent + AgentSession + entrypoint + @function_tool tools + persona instructions.
-#
-# Substrate: lexxautomates/agents (fork of livekit/agents)
-# Reference: ruxakK/friday_jarvis
-# Patterns: drive-thru, frontdesk, healthcare, hotel_receptionist examples
+# Runtime: LiveKit agents SDK voice process. Flask (web/) is the companion
+# HTTP layer; this file is the voice runtime.
 
 import logging
-from dataclasses import dataclass
+from datetime import datetime, timezone
 
-from livekit.agents import Agent, AgentServer, AgentSession, JobContext, RunContext, cli, function_tool, inference
-from livekit.agents.llm import ToolError
+from livekit.agents import (
+    Agent,
+    AgentSession,
+    JobContext,
+    WorkerOptions,
+    cli,
+)
 
-logger = logging.getLogger("personal-ai-agent")
+from . import db as dbmod
+from . import memory
+from . import scheduler
+from . import tool_impls
+from . import tools
+from .voice import create_voice_stack
 
-
-# ---------------------------------------------------------------------------
-# Tools - start as stubs; replace with real implementations as the tool layer
-# grows. The first real tools are calendar + email + reminders + notes for one
-# user; Zapier MCP covers the long tail later.
-# ---------------------------------------------------------------------------
-
-@function_tool()
-async def get_status(context: RunContext) -> str:
-    """Return the current status of the personal assistant: whether it is running,
-    how many sessions it has seen today, and whether the web layer is reachable."""
-    return "Personal AI Agent is running. Status endpoints: /health, /status."
-
-
-@function_tool()
-async def remind(context: RunContext, note: str, at_iso: str) -> str:
-    """Schedule a reminder for the user. at_iso is an ISO datetime the reminder
-    should fire at. This is a stub; the real implementation writes to the
-    background scheduler."""
-    return f"Reminder noted for {at_iso}: {note}. (Stub - scheduler not wired yet.)"
-
-
-@function_tool()
-async def note(context: RunContext, text: str) -> str:
-    """Jot a note for the user. This is a stub; the real implementation persists
-    to the user's notes store."""
-    return f"Noted: {text}. (Stub - notes store not wired yet.)"
-
-
-# ---------------------------------------------------------------------------
-# Agent
-# ---------------------------------------------------------------------------
+logger = logging.getLogger("jarvis")
 
 INSTRUCTIONS = """
-You are a personal assistant for a solo entrepreneur and everyday person.
-You help with scheduling, email, web lookups, reminders, contacts, notes, and
-similar everyday errands.
+You are Jarvis, Alexandria's personal AI butler. Voice-first: keep replies short
+and spoken, no markdown, no lists, no emojis. Personality: dry British-butler
+wit, lightly sarcastic, always helpful. Address Alexandria as "ma'am". Never
+invent tool results. If a tool fails, say so plainly and offer an alternative.
+When you take an action, say what you did in one short sentence.
 
-A few rules:
-- Be concise and useful.
-- When you take an action, tell the user what you did in one short sentence.
-- When you cannot do something, say so plainly and suggest the next best thing.
-- Do not make up tools or capabilities you do not have.
-- If a request is out of scope or risky, ask before acting.
+Tool rules you must follow:
+- Reading (email search, calendar, notes, web, weather) is always fine.
+- Sending email and creating calendar events are CONFIRM-FIRST: the tool will
+  hand you a confirmation number and an ask-aloud sentence. Ask Alexandria
+  aloud, and only call confirm_action with the confirmation number if she
+  says yes.
+- If a tool refuses or is unavailable, say so plainly in your own words and
+  offer the next best thing. Never pretend you did something you didn't.
 """
 
 
 class PersonalAgent(Agent):
-    def __init__(self) -> None:
-        super().__init__(
-            instructions=INSTRUCTIONS,
-            tools=[get_status, remind, note],
-        )
+    def __init__(self, startup_brief: str = "") -> None:
+        instructions = INSTRUCTIONS
+        if startup_brief.strip():
+            instructions += "\nSession brief:\n" + startup_brief.strip()
+        super().__init__(instructions=instructions, tools=tools.ALL_TOOLS)
 
     async def on_enter(self) -> None:
-        await self.session.generate_reply(
-            instructions=(
-                "Welcome the user briefly and ask how you can help. Keep it to one "
-                "or two sentences. You are the personal AI assistant."
-            ),
-        )
+        due = tool_impls.check_due_reminders(dbmod.connect())
+        if due:
+            await self.session.generate_reply(instructions=(
+                "Greet Alexandria briefly as her butler, then read her these "
+                f"due reminders: {due}"
+            ))
+        else:
+            await self.session.generate_reply(instructions=(
+                "Greet Alexandria briefly as her butler — one short sentence — "
+                "and ask how you may be of service."
+            ))
 
 
-server = AgentServer()
-
-
-@server.rtc_session()
 async def entrypoint(ctx: JobContext) -> None:
-    session = AgentSession(
-        stt=inference.STT("google/gemini-2.5-flash"),
-        llm=inference.LLM("google/gemini-2.5-flash"),
-        tts=inference.TTS("google/cloud-tts"),  # placeholder provider; swap in a real voice
-    )
-    await session.start(agent=PersonalAgent(), room=ctx.room)
+    dbmod.init_db()
+    scheduler.start_reminder_watcher()
+
+    conn = dbmod.connect()
+    brief = memory.startup_context(conn)
+    conn.close()
+
+    started_at = datetime.now(timezone.utc).isoformat()
+    vad, stt, llm, tts = create_voice_stack()
+    session = AgentSession(vad=vad, stt=stt, llm=llm, tts=tts)
+
+    try:
+        await session.start(agent=PersonalAgent(startup_brief=brief), room=ctx.room)
+    finally:
+        # Session over: append a short episodic entry for next time.
+        try:
+            conn = dbmod.connect()
+            memory.log_episode(
+                conn,
+                "Voice session with Alexandria (summary not captured in this build).",
+                started_at,
+            )
+            conn.close()
+        except Exception:
+            logger.exception("failed to log episodic entry")
 
 
 if __name__ == "__main__":
-    cli.run_app(server)
+    # Classic worker shape: connects to LiveKit over LIVEKIT_URL itself and
+    # takes dispatched jobs. No agent_dispatch block needed in livekit.yaml.
+    cli.run_app(WorkerOptions(entrypoint_fnc=entrypoint, agent_name="jarvis"))

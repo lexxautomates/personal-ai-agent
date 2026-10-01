@@ -1,0 +1,20 @@
+[Unit]
+Description=Jarvis personal agent - Flask web layer
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/jarvis/app
+EnvironmentFile=/opt/jarvis/.env
+Environment=PYTHONUNBUFFERED=1
+# web/app.py runs its own main() (Flask dev server on FLASK_PORT, default 5000).
+# If traffic ever outgrows the dev server, swap this for gunicorn.
+ExecStart=/opt/jarvis/venv/bin/python /opt/jarvis/app/web/app.py
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

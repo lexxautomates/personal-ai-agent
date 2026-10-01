@@ -1,0 +1,47 @@
+# livekit.yaml.example - self-hosted LiveKit server config for the Jarvis agent.
+#
+# Copied to /opt/jarvis/livekit/livekit.yaml by deploy.sh (first run only; never
+# overwritten). API keys are NOT in this file - they come from
+# /opt/jarvis/livekit/keys.yaml via the --keys-file flag (see generate-keys.sh).
+#
+# LiveKit parses this config in strict mode: unknown fields fail startup.
+# Field names verified against the v1.13.x config (port, bind_addresses,
+# rtc.tcp_port, rtc.udp_port, rtc.use_external_ip, room.*, turn.*, agent_dispatch.*).
+# If the server refuses to start after a version bump, check
+#   docker logs jarvis-livekit
+# for the exact "field ... not found" line and adjust here.
+
+port: 7880
+bind_addresses:
+  - "0.0.0.0"
+log_level: info
+
+rtc:
+  tcp_port: 7881
+  udp_port: 7882
+  # The VPS has its public IP directly on the interface (Contabo, no 1:1 NAT),
+  # so LiveKit can advertise it to clients. If ICE starts failing, pin the IP:
+  #   node_ip: 86.48.18.41
+  use_external_ip: true
+
+room:
+  empty_timeout: 600
+  max_participants: 20
+  auto_create: true
+  enable_remote_unmute: true
+
+turn:
+  # Built-in TURN fallback for clients behind restrictive NATs.
+  # Served on 3478/udp (mapped in docker-compose.livekit.yml).
+  # Open it only if you need it:  ufw allow 3478/udp
+  enabled: true
+  udp_port: 3478
+  # TLS TURN (5349) needs cert files mounted into the container; enable when
+  # you want TURN-over-TLS through Caddy. Until then, plain 3478/udp is enough.
+
+# NOTE: no agent_dispatch block here. The agent runs as a classic worker
+# (WorkerOptions in agent/agent.py): it connects to LiveKit itself over
+# LIVEKIT_URL and takes jobs the web layer dispatches via the API when a
+# client mints a token. livekit-server v1.13.x rejects unknown config fields,
+# so do not add agent_dispatch back without verifying the server version
+# accepts it.

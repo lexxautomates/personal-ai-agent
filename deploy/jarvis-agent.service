@@ -1,0 +1,25 @@
+[Unit]
+Description=Jarvis personal agent - LiveKit agents worker
+After=network.target docker.service
+Wants=docker.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/jarvis/app
+EnvironmentFile=/opt/jarvis/.env
+Environment=PYTHONUNBUFFERED=1
+# Production worker mode per the livekit-agents CLI.
+# agent/agent.py uses the classic worker shape
+# (cli.run_app(WorkerOptions(entrypoint_fnc=...))): the worker connects to
+# LiveKit itself over LIVEKIT_URL/KEY/SECRET from /opt/jarvis/.env and takes
+# jobs the web layer dispatches via the API. `start` is the worker command.
+# Runs as a module (relative imports inside the agent package).
+ExecStart=/opt/jarvis/venv/bin/python -m agent.agent start
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

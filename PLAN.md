@@ -142,6 +142,47 @@ project's Hermes state goes there.
 
 ## Status
 
-Plan + first code scaffolding. Minimal voice agent scaffolding in agent/, Flask
-web layer scaffolding in web/, Flutter client adapted from livekit_flutter_starter
-in client/. No live server, no tools beyond stubs, no Zapier MCP yet.
+Agent runtime is REAL (built 2026-10-01, working tree — not yet committed):
+
+- `agent/agent.py` — PersonalAgent with the Jarvis persona (dry British-butler
+  wit, voice-first, addresses Alexandria as "ma'am"), entrypoint with
+  AgentSession(vad, stt, llm, tts), AgentServer + `@server.rtc_session()`.
+  Session start reads memory brief + announces due reminders; session end
+  appends an episodic log entry.
+- `agent/voice.py` — free self-hosted stack: WhisperSTT (faster-whisper
+  base.en, CPU int8) on the livekit STT interface, PiperTTS
+  (en_US-lessac-medium, downloaded on first run) on the livekit TTS
+  interface, Silero VAD, Ollama LLM (qwen2.5:7b-instruct, OLLAMA_URL).
+- `agent/tool_impls.py` + `agent/tools.py` — 17 real @function_tool tools:
+  notes jot/list/search, reminders add/list/cancel + due-reminder check,
+  gmail_search/read/draft, gmail_send (confirm-first), calendar_list,
+  calendar_create (confirm-first), confirm_action, web_search (DuckDuckGo),
+  weather (Open-Meteo), get_status. Gmail/Calendar go through the Nat (n8n)
+  bridge: POST http://localhost:5678/webhook/jarvis-tools
+  {"op","params"} + X-Jarvis-Secret; bridge failures are plain-English
+  voice sentences, never tracebacks.
+- `agent/policy.py` — permission layer: reads + local writes auto-allow,
+  gmail_send/calendar_create confirm-first (recorded in
+  pending_confirmations, executed via confirm_action), destructive/out-of-scope
+  refused with plain-English handoff. Every external write calls
+  policy.check() first.
+- `agent/memory.py` — cross-session sqlite memory: profile, episodic log,
+  follow_ups; brief injected at session start.
+- `agent/scheduler.py` — daemon thread every 60s moves due reminders into
+  due_outbox (announced at next session start; push delivery wiring later).
+- `agent/schema.sql` — extended: due_outbox, pending_confirmations, profile,
+  episodic, follow_ups (original notes/reminders tables untouched).
+- `agent/requirements.txt` — pinned, pip dry-run resolves on Python 3.12.
+- `agent/.env.example` — all config via env, no secrets in code.
+- `tests/` — 22 pytest tests green: policy allow/confirm/refuse,
+  notes/reminders sqlite round-trip, Nat bridge with fake HTTP server
+  (op/params/secret header, graceful failures), web/weather parsers on
+  fixture JSON.
+
+Not yet: live server run, Flutter client repointing, Zapier MCP, push
+delivery of due reminders, session-summary capture for the episodic log.
+
+Earlier status (kept for history): plan + first code scaffolding. Minimal
+voice agent scaffolding in agent/, Flask web layer scaffolding in web/,
+Flutter client adapted from livekit_flutter_starter in client/. No live
+server, no tools beyond stubs, no Zapier MCP yet.
