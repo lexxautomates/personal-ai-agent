@@ -58,3 +58,40 @@ CREATE TABLE IF NOT EXISTS follow_ups (
     done INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL
 );
+
+-- CallCovered knowledge base: one row per article (seeded from agent/kb/*.md).
+CREATE TABLE IF NOT EXISTS kb_articles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL UNIQUE,
+    body TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL
+);
+
+-- Full-text search over the knowledge base (external-content FTS5).
+CREATE VIRTUAL TABLE IF NOT EXISTS kb_fts USING fts5(
+    title, body, content='kb_articles', content_rowid='id'
+);
+
+-- CallCovered client onboarding pipeline.
+CREATE TABLE IF NOT EXISTS clients (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    business_name TEXT NOT NULL,
+    owner_name TEXT NOT NULL DEFAULT '',
+    phone TEXT NOT NULL DEFAULT '',
+    email TEXT NOT NULL DEFAULT '',
+    tier TEXT NOT NULL DEFAULT '',
+    stage TEXT NOT NULL DEFAULT 'intake',
+    details TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+-- stage: intake | a2p | subaccount | snapshot | forwarding | voice_config |
+--        test_call | live | paused
+
+CREATE TABLE IF NOT EXISTS client_notes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_id INTEGER NOT NULL,
+    note TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);

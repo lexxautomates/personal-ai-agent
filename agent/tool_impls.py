@@ -8,6 +8,7 @@ ask-aloud sentence; confirm_action() executes after Alexandria approves.
 
 import json
 import logging
+import re
 import sqlite3
 from datetime import datetime, timezone
 
@@ -368,3 +369,152 @@ def get_status(db: sqlite3.Connection) -> str:
         "SELECT COUNT(*) c FROM due_outbox WHERE announced = 0").fetchone()["c"]
     return (f"All systems nominal, ma'am. {pending} reminder{'s' if pending != 1 else ''} "
             f"pending, {unannounced} awaiting announcement.")
+
+
+# ---------------------------------------------------------------------------
+# CallCovered knowledge base (local, read-only -> auto-allowed)
+# ---------------------------------------------------------------------------
+
+def kb_search(db: sqlite3.Connection, query: str) -> str:
+    from . import kb as kbmod
+    hits = kbmod.search_kb(db, query, limit=3)
+    if not hits:
+        return ("Nothing in the CallCovered handbook on that, ma'am. "
+                "Shall I look it up on the web instead?")
+    terms = [t for t in re.findall(r"[a-z0-9]+", query.lower())
+             if t not in kbmod._STOPWORDS and len(t) > 1]
+    parts = []
+    for h in hits:
+        snippet = _best_snippet(h["body"], terms)
+        parts.append(f"{h['title']}: {snippet}")
+    return "From the handbook, ma'am: " + " ... ".join(parts)
+
+
+def _best_snippet(body: str, terms: list[str], max_chars: int = 450) -> str:
+    """Pick the sentences with the most query-term overlap (voice-friendly)."""
+    text = body.replace("\n", " ")
+    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()]
+    if not sentences:
+        return text[:max_chars]
+    def score(s: str) -> int:
+        low = s.lower()
+        return sum(low.count(t) for t in terms)
+    ranked = sorted(sentences, key=score, reverse=True)
+    if not terms or score(ranked[0]) == 0:
+        chosen = sentences[:2]
+    else:
+        chosen = [s for s in ranked if score(s) > 0][:3]
+    out = " ".join(chosen)
+    return out if len(out) <= max_chars else out[:max_chars] + " ..."
+
+
+# ---------------------------------------------------------------------------
+# CallCovered client onboarding (local records -> auto-allowed)
+# ---------------------------------------------------------------------------
+
+_STAGES = ["intake", "a2p", "subaccount", "snapshot", "forwarding",
+           "voice_config", "test_call", "live", "paused"]
+
+_STAGE_NEXT = {
+    "intake": ("a2p", "collect their business details, then start A2P registration — "
+               "texts can't go out until the carrier approves it"),
+    "a2p": ("subaccount", "provision their CallCovered sub-account"),
+    "subaccount": ("snapshot", "deploy the roofing snapshot"),
+    "snapshot": ("forwarding", "get call forwarding or the tracking number live"),
+    "forwarding": ("voice_config", "configure the AI voice agent and greeting"),
+    "voice_config": ("test_call", "place a live test call and verify booking"),
+    "test_call": ("live", "go live, then set day-1, day-3 and day-7 check-in reminders"),
+    "live": ("live", "they're live — keep up the check-ins"),
+    "paused": ("intake", "resume them back at intake"),
+}
+
+
+def client_add(db: sqlite3.Connection, business_name: str, owner_name: str = "",
+               phone: str = "", email: str = "", tier: str = "") -> str:
+    business_name = (business_name or "").strip()
+    if not business_name:
+        return "I need the business name to start onboarding, ma'am."
+    cur = db.execute(
+        """INSERT INTO clients
+           (business_name, owner_name, phone, email, tier, stage, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, 'intake', ?, ?)""",
+        (business_name, owner_name.strip(), phone.strip(), email.strip(),
+         tier.strip(), _now(), _now()),
+    )
+    db.commit()
+    cid = cur.lastrowid
+    return (f"{business_name} is in the onboarding pipeline as client #{cid}, ma'am, "
+            f"at the intake stage. Next: {_STAGE_NEXT['intake'][1]}, ma'am.")
+
+
+def client_stage(db: sqlite3.Connection, client_id: int, stage: str) -> str:
+    stage = (stage or "").strip().lower()
+    if stage not in _STAGES:
+        return (f"That isn't a pipeline stage, ma'am. The stages are: "
+                f"{', '.join(_STAGES[:-1])}, or paused.")
+    row = db.execute("SELECT id, business_name FROM clients WHERE id = ?",
+                     (client_id,)).fetchone()
+    if not row:
+        return f"No client #{client_id} on file, ma'am."
+    db.execute("UPDATE clients SET stage = ?, updated_at = ? WHERE id = ?",
+               (stage, _now(), client_id))
+    db.commit()
+    nxt, hint = _STAGE_NEXT[stage]
+    if stage == "live":
+        return (f"{row['business_name']} is live, ma'am. {hint}.")
+    return (f"{row['business_name']} moved to {stage}, ma'am. Next: {hint}.")
+
+
+def client_list(db: sqlite3.Connection, stage: str = "") -> str:
+    stage = (stage or "").strip().lower()
+    if stage and stage not in _STAGES:
+        return f"That isn't a pipeline stage, ma'am."
+    q = "SELECT id, business_name, owner_name, tier, stage FROM clients ORDER BY id"
+    args: tuple = ()
+    if stage:
+        q = ("SELECT id, business_name, owner_name, tier, stage FROM clients "
+             "WHERE stage = ? ORDER BY id")
+        args = (stage,)
+    rows = db.execute(q, args).fetchall()
+    if not rows:
+        return "No clients in the pipeline, ma'am."
+    parts = [f"#{r['id']} {r['business_name']} ({r['stage']})"
+             + (f" — {r['tier']}" if r['tier'] else "") for r in rows]
+    return "Onboarding pipeline, ma'am: " + " ... ".join(parts)
+
+
+def client_get(db: sqlite3.Connection, client_id: int) -> str:
+    row = db.execute("SELECT * FROM clients WHERE id = ?", (client_id,)).fetchone()
+    if not row:
+        return f"No client #{client_id} on file, ma'am."
+    notes = db.execute(
+        "SELECT note, created_at FROM client_notes WHERE client_id = ? "
+        "ORDER BY id DESC LIMIT 3", (client_id,)).fetchall()
+    bits = [f"{row['business_name']}", f"stage: {row['stage']}"]
+    if row["owner_name"]:
+        bits.append(f"owner: {row['owner_name']}")
+    if row["tier"]:
+        bits.append(f"tier: {row['tier']}")
+    if row["phone"]:
+        bits.append(f"phone: {row['phone']}")
+    detail = ", ".join(bits)
+    if notes:
+        detail += ". Recent notes: " + " ... ".join(n["note"] for n in notes)
+    return detail + ", ma'am."
+
+
+def client_note(db: sqlite3.Connection, client_id: int, note: str) -> str:
+    note = (note or "").strip()
+    if not note:
+        return "I didn't catch the note, ma'am."
+    row = db.execute("SELECT business_name FROM clients WHERE id = ?",
+                     (client_id,)).fetchone()
+    if not row:
+        return f"No client #{client_id} on file, ma'am."
+    db.execute(
+        "INSERT INTO client_notes (client_id, note, created_at) VALUES (?, ?, ?)",
+        (client_id, note, _now()),
+    )
+    db.execute("UPDATE clients SET updated_at = ? WHERE id = ?", (_now(), client_id))
+    db.commit()
+    return f"Logged against {row['business_name']}, ma'am."

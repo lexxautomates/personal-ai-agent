@@ -125,10 +125,49 @@ async def get_status(context: RunContext) -> str:
     return impl.get_status(_db())
 
 
+@function_tool()
+async def kb_search(context: RunContext, query: str) -> str:
+    """Search the CallCovered handbook: tiers, onboarding, compliance, objections."""
+    return impl.kb_search(_db(), query)
+
+
+@function_tool()
+async def client_add(context: RunContext, business_name: str, owner_name: str = "",
+                     phone: str = "", email: str = "", tier: str = "") -> str:
+    """Start onboarding a new CallCovered client (roofing business owner)."""
+    return impl.client_add(_db(), business_name, owner_name, phone, email, tier)
+
+
+@function_tool()
+async def client_stage(context: RunContext, client_id: int, stage: str) -> str:
+    """Move a client to a pipeline stage: intake, a2p, subaccount, snapshot, forwarding, voice_config, test_call, live, paused."""
+    return impl.client_stage(_db(), client_id, stage)
+
+
+@function_tool()
+async def client_list(context: RunContext, stage: str = "") -> str:
+    """List CallCovered clients in the onboarding pipeline, optionally one stage."""
+    return impl.client_list(_db(), stage)
+
+
+@function_tool()
+async def client_get(context: RunContext, client_id: int) -> str:
+    """Show one client's details, stage, and recent notes."""
+    return impl.client_get(_db(), client_id)
+
+
+@function_tool()
+async def client_note(context: RunContext, client_id: int, note: str) -> str:
+    """Log a note against a client's onboarding record."""
+    return impl.client_note(_db(), client_id, note)
+
+
 ALL_TOOLS = [
     notes_jot, notes_list, notes_search,
     reminder_add, reminder_list, reminder_cancel, check_due_reminders,
     gmail_search, gmail_read, gmail_draft, gmail_send,
     calendar_list, calendar_create, confirm_action,
     web_search, weather, get_status,
+    kb_search,
+    client_add, client_stage, client_list, client_get, client_note,
 ]
